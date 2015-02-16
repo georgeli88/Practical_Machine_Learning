@@ -1,0 +1,142 @@
+---
+title: "Practical Machine Learning Course Project"
+output: html_document
+---
+
+## Executive Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.   
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise, which is the "classe" variable in the training set.  
+
+With the Random Forest model, we are able to predict how well a person is preforming an excercise with accuracy of 99.44%. 
+
+## Data Processing
+
+The training data for this project are available here [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)  
+
+The test data are available here [https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+
+### Download Training Data
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+pmlTraining <- "./pml-training.csv"
+if (!file.exists(pmlTraining))
+{
+        fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+        download.file(fileUrl, destfile=pmlTraining)
+        dateDownloaded <-date()
+}
+training <- read.csv(pmlTraining)
+```
+
+### Cleanup Training Data
+We first get all of the columns containing belt, forearm, arm, and dumbbell.  
+
+There are many columns with empty and NA values. So we need to remove the columns with empty or NA values and only keep the columns with valid numbers. 
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+index <- grepl("belt|forearm|arm|dumbbell", names(training), ignore.case=TRUE)
+isAnyMissing <- sapply(training, function (x) any(is.na(x) | x == ""))
+newTraining <- training[, index & !isAnyMissing==TRUE]
+
+# include the last column "classe" to the new training data set
+newTraining <- cbind(training$classe, newTraining)
+
+# rename the first column to classe
+colnames(newTraining)[1] <- "classe"
+
+# set the factor for the first column
+newTraining$classe <- factor(newTraining$classe)
+
+names(newTraining)
+```
+
+After the cleanup, with exclusion of the outcome variable "classe", the new dataset contains 52 predictor variables (compared to 159 predictors before the cleanup).  
+
+### Build the Model
+
+We first split the dataset into a typical 60% training and 40% testing dataset.
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+library(caret)
+library(randomForest)
+set.seed(32343)
+inTrain <- createDataPartition(y=newTraining$classe, p=0.60, list=FALSE)
+splitTraining <- newTraining[ inTrain,]
+splitTesting  <- newTraining[-inTrain,]
+```
+
+Then we use "rpart" (Recursive Partitioning and Regression Trees) method and "lda" (Linear Discriminant Analysis) to build 2 models and check the model accuracy using Confusion Matrix on the remaining 40% of test data.
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+# Use rpart: Recursive Partitioning and Regression Trees
+# NOTE: It takes long time to generae training model with rpart. Be patient!
+library(rpart)
+modFit2 <- train(classe~., data=splitTraining, method="rpart")
+pred2 <- predict(modFit2, newdata=splitTesting)
+c2 <- confusionMatrix(pred2, splitTesting$classe)$overall
+
+# Use lda: Linear Discriminant Analysis. 
+library(MASS)
+modFit3 <- train(classe~., data=splitTraining, method="lda")
+pred3 <- predict(modFit3, newdata=splitTesting)
+c3 <- confusionMatrix(pred3, splitTesting$classe)$overall
+# Model accuracy 
+accuracyrate <- cbind(c2[1], c3[1])
+colnames(accuracyrate) <- c("rpart", "lda")
+accuracyrate
+```
+
+The model accuracy of "rpart" is 54.78% and the model accuracy of lda is 70.39%, which is not high.     
+
+Random Forest is one of the two top performing algorithms along with bootsing in predictions contests. Although it is difficult to interpret, it is often very accurate, Thus we create the third training model with Random Forest.  
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+modFit3 <- randomForest(splitTraining$classe ~ ., data = splitTraining)
+modFit3
+```
+
+### Cross-Validation
+The Random Forest model is used to classify the remaining 40% of the data. A Confusion Matrix is created by passing the predictions from the model and the actual classifications, which determines the accuracy of the model.
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+predictions <- predict(modFit3, newdata=splitTesting)
+confusionMatrix(predictions, splitTesting$classe)
+
+library(ggplot2)
+splitTesting$predRight <- predictions==splitTesting$classe
+qplot(total_accel_belt, total_accel_arm, colour=predRight, data=splitTesting, main="newdata prediction", size=I(5))
+```
+
+The accuracy of the above model is 99.44% which is very high. By comparing with "rpart" and "lda", it turns out Random Forest is a great model to fit the given training dataset. 
+
+## Predictions of 20 Test Cases 
+
+We load a new testing data set and perform the same data processing and cleanup as above. Then the random forest model is used to predict the classifications of the 20 results of this new testing data.
+
+```{r, echo=TRUE, warning=FALSE, fig.height=5, fig.width=8}
+pmlTesting <- "./pml-testing.csv"
+if (!file.exists(pmlTesting))
+{
+        fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+        download.file(fileUrl, destfile=pmlTesting)
+        dateDownloaded <-date()
+}
+testing <- read.csv(pmlTesting)
+
+# Process and clean up the data to get the variables containing belt, forearm, arm, and dumbbell
+index <- grepl("belt|forearm|arm|dumbbell", names(testing), ignore.case=TRUE)
+
+# Find the columns with "NA" or empty values
+isAnyMissing <- sapply(testing, function (x) any(is.na(x) | x == ""))
+
+# Generate clean test data
+clean_test_data <- testing[, index & !isAnyMissing==TRUE]
+clean_test_data <- cbind(testing$problem_id, clean_test_data)
+colnames(clean_test_data)[1] <- "classe"
+
+# predict the data
+predictTest <- predict(modFit3, newdata=clean_test_data)
+predictTest
+```
+
